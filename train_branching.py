@@ -5,6 +5,7 @@ import os
 import numpy as np
 from spinup import ppo_pytorch as ppo
 from pipe_env import PipeRoutingEnv
+from spinup.utils.mpi_tools import mpi_fork
 
 # --- 1. 配置路径 ---
 PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/assembly7_pe_leaflevel.npy"
@@ -50,6 +51,7 @@ logger_kwargs = dict(
 )
 
 if __name__ == "__main__":
+    mpi_fork(n=10)
     ppo(
         env_fn=env_fn,
         ac_kwargs=ac_kwargs,

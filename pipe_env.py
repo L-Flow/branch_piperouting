@@ -116,8 +116,8 @@ class PipeRoutingEnv(gym.Env):
         # 阶段控制参数
         self.PHASE_TRUNK = 0.0
         self.PHASE_BRANCH = 1.0
-        self.SPLIT_STEP = 20
-        self.max_steps = 60
+        self.SPLIT_STEP = 10  # 建议设为20，给主干足够的生长时间
+        self.max_steps = 60  # 增加总步数以适应分支生长
         self.action_step_size = step_size
 
         # 传感器参数
@@ -140,12 +140,12 @@ class PipeRoutingEnv(gym.Env):
         # 奖励权重
         self.weights = {
             'dist': 0.5,
-            'len': 0.02,
+            'len': 0.02,  # 稍微调大长度惩罚
             'obs': 0.2,
             'pe': 1.0,
             'success': 40.0,
-            'curvature': 0.5,
-            'torsion': 0.1
+            'curvature': 0.5,  # 曲率惩罚
+            'torsion': 0.1  # 挠率惩罚
         }
 
     def _query_potential(self, point_xyz) -> float:
@@ -157,7 +157,7 @@ class PipeRoutingEnv(gym.Env):
     def _calculate_tee_geometry(self, trunk_end, trunk_tangent):
         """计算贴壁三通几何"""
         # Local Definition
-        local_p3 = np.array([25.0, 0.0, 23.5])  # Inlet
+        local_p3 = np.array([-25.0, 0.0, -23.5])  # Inlet
         local_p1 = np.array([0.0, 0.0, 0.0])  # Outlet 1
         local_p2 = np.array([50.0, 0.0, 0.0])  # Outlet 2
 
@@ -332,19 +332,53 @@ class PipeRoutingEnv(gym.Env):
             self.trunk_head = p_new
             self.trunk_points.append(p_new.tolist())
 
+            # 检查分叉
             if self.current_step == self.SPLIT_STEP:
                 trunk_tan = self.trunk_head - self.trunk_prev
+                trunk_tan_norm = trunk_tan / (np.linalg.norm(trunk_tan) + 1e-6)
+                D = self.pipe_radius * 2.0  # 管径
+
+                # --- 1. 处理主干末端 (Trunk End) ---
+                # 主干在这里结束，添加两个延长的固定点以"锁定"方向 (类似End Constraint)
+                # 延申点1: Center + 1 * D
+                # 延申点2: Center + 2 * D
+                # 注意: 主干的"Center"就是当前的 trunk_head (P3)
+                p3_ext1 = self.trunk_head + trunk_tan_norm * D
+                p3_ext2 = self.trunk_head + trunk_tan_norm * 2.0 * D
+                self.trunk_points.append(p3_ext1.tolist())
+                self.trunk_points.append(p3_ext2.tolist())
+                self.trunk_weights.extend([1.0, 1.0])
+
+                # --- 2. 计算分支起始几何 ---
                 starts, tangents = self._calculate_tee_geometry(self.trunk_head, trunk_tan)
 
-                self.branch1_head = starts[0]
-                self.branch1_prev = starts[0] - tangents[0] * 10.0
-                self.branch1_points = [starts[0].tolist()]
-                self.branch1_weights = [1.0]
+                # --- 3. 设置分支 1 (Branch 1) ---
+                # 起始点固定序列: [Center, Center + 1*D, Center + 2*D]
+                b1_center = starts[0]
+                b1_tan = tangents[0]
+                b1_fixed_pts = [
+                    b1_center,
+                    b1_center + b1_tan * D,
+                    b1_center + b1_tan * 2.0 * D
+                ]
+                self.branch1_points = [p.tolist() for p in b1_fixed_pts]
+                self.branch1_weights = [1.0, 1.0, 1.0]
+                # 更新头部和前一点，使下一步生长从延伸点开始
+                self.branch1_head = b1_fixed_pts[-1]
+                self.branch1_prev = b1_fixed_pts[-2]
 
-                self.branch2_head = starts[1]
-                self.branch2_prev = starts[1] - tangents[1] * 10.0
-                self.branch2_points = [starts[1].tolist()]
-                self.branch2_weights = [1.0]
+                # --- 4. 设置分支 2 (Branch 2) ---
+                b2_center = starts[1]
+                b2_tan = tangents[1]
+                b2_fixed_pts = [
+                    b2_center,
+                    b2_center + b2_tan * D,
+                    b2_center + b2_tan * 2.0 * D
+                ]
+                self.branch2_points = [p.tolist() for p in b2_fixed_pts]
+                self.branch2_weights = [1.0, 1.0, 1.0]
+                self.branch2_head = b2_fixed_pts[-1]
+                self.branch2_prev = b2_fixed_pts[-2]
 
                 self.current_phase = self.PHASE_BRANCH
 
@@ -396,9 +430,3 @@ class PipeRoutingEnv(gym.Env):
 
         done = (self.current_step >= self.max_steps) or (self.done1 and self.done2)
         return self._get_observation(), reward, done, {}
-
-    def render(self, mode='human'):
-        pass
-
-    def close(self):
-        pass
