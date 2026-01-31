@@ -23,9 +23,8 @@ START_N = [10, 17.32, 0.0]
 
 TARGET_LIST = [
     # Target 1 (左侧分支目标)
-    {'point': [44, 537.5, -229], 'normal': [1, 0, 0]},
-    # Target 2 (右侧分支目标)
-    {'point': [462.84, 273.6, -448.6], 'normal': [0, 0, 1]}
+    {'point': [462.84, 273.6, -448.6], 'normal': [0, 0, -1]},
+    {'point': [44, 537.5, -229], 'normal': [-1, 0, 0]}
 ]
 
 
@@ -56,7 +55,7 @@ if __name__ == "__main__":
         env_fn=env_fn,
         ac_kwargs=ac_kwargs,
         steps_per_epoch=4000,
-        epochs=2000,          # 适当增加训练轮数
+        epochs=50,          # 适当增加训练轮数
         gamma=0.99,
         clip_ratio=0.2,
         pi_lr=7e-4 ,           # 稍微调大学习率

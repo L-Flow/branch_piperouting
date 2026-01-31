@@ -139,13 +139,13 @@ class PipeRoutingEnv(gym.Env):
 
         # 奖励权重
         self.weights = {
-            'dist': 0.5,
+            'dist': 0.3,
             'len': 0.03,  # 稍微调大长度惩罚
-            'obs': 2,
+            'obs': 3,
             'pe': 1.0,
             'success': 40.0,
-            'curvature': 0.005,  # 曲率惩罚
-            'torsion': 0.005  # 挠率惩罚
+            'curvature': 0.1,  # 曲率惩罚
+            'torsion': 0.05  # 挠率惩罚
         }
 
     def _query_potential(self, point_xyz) -> float:
@@ -157,9 +157,9 @@ class PipeRoutingEnv(gym.Env):
     def _calculate_tee_geometry(self, trunk_end, trunk_tangent):
         """计算贴壁三通几何"""
         # Local Definition
-        local_p3 = np.array([25.0, 0.0, -23.5])  # Inlet
-        local_p1 = np.array([0.0, 0.0, 0.0])  # Outlet 1
-        local_p2 = np.array([50.0, 0.0, 0.0])  # Outlet 2
+        local_p3 = np.array([25.0, 0.0, 23.5])  # Inlet
+        local_p1 = np.array([50.0, 0.0, 0.0])  # Outlet 1
+        local_p2 = np.array([0.0, 0.0, 0.0])  # Outlet 2
 
         t_global_z = trunk_tangent / (np.linalg.norm(trunk_tangent) + 1e-6)
 
@@ -172,7 +172,7 @@ class PipeRoutingEnv(gym.Env):
             radial_vec /= r_norm
 
         # 构建旋转矩阵 R (Local Z -> Trunk Tangent)
-        u_z = t_global_z
+        u_z = -t_global_z
         proj = radial_vec - np.dot(radial_vec, u_z) * u_z
         if np.linalg.norm(proj) < 1e-3:
             arbitrary = np.array([0, 0, 1]) if abs(u_z[2]) < 0.9 else np.array([0, 1, 0])
@@ -190,8 +190,8 @@ class PipeRoutingEnv(gym.Env):
         global_p2 = T_trans + R @ local_p2
 
         # 简单的出口方向向量 (Local X 轴方向)
-        global_v1 = R @ np.array([-1.0, 0.0, 0.0])
-        global_v2 = R @ np.array([1.0, 0.0, 0.0])
+        global_v1 = R @ np.array([1.0, 0.0, 0.0])
+        global_v2 = R @ np.array([-1.0, 0.0, 0.0])
 
         # 目标匹配
         vec_to_t1 = self.targets[0]['point'] - trunk_end
@@ -257,7 +257,7 @@ class PipeRoutingEnv(gym.Env):
         ])
 
     def _get_observation(self):
-        # 39维 (Time Feature 已移除)
+        # 39维
         if self.current_phase == self.PHASE_TRUNK:
             s1 = self._get_single_slot(self.trunk_head, self.trunk_prev, 0)
             s2 = self._get_single_slot(self.trunk_head, self.trunk_prev, 1)
@@ -338,22 +338,17 @@ class PipeRoutingEnv(gym.Env):
                 trunk_tan_norm = trunk_tan / (np.linalg.norm(trunk_tan) + 1e-6)
                 D = self.pipe_radius * 2.0  # 管径
 
-                # --- 1. 处理主干末端 (Trunk End) ---
-                # 主干在这里结束，添加两个延长的固定点以"锁定"方向 (类似End Constraint)
-                # 延申点1: Center + 1 * D
-                # 延申点2: Center + 2 * D
-                # 注意: 主干的"Center"就是当前的 trunk_head (P3)
+                # 1. 锁定主干末端 (Center + 1D + 2D)
                 p3_ext1 = self.trunk_head + trunk_tan_norm * D
                 p3_ext2 = self.trunk_head + trunk_tan_norm * 2.0 * D
                 self.trunk_points.append(p3_ext1.tolist())
                 self.trunk_points.append(p3_ext2.tolist())
                 self.trunk_weights.extend([1.0, 1.0])
 
-                # --- 2. 计算分支起始几何 ---
+                # 2. 计算分支几何
                 starts, tangents = self._calculate_tee_geometry(self.trunk_head, trunk_tan)
 
-                # --- 3. 设置分支 1 (Branch 1) ---
-                # 起始点固定序列: [Center, Center + 1*D, Center + 2*D]
+                # 3. 设置 Branch 1 (Start + 1D + 2D)
                 b1_center = starts[0]
                 b1_tan = tangents[0]
                 b1_fixed_pts = [
@@ -363,11 +358,10 @@ class PipeRoutingEnv(gym.Env):
                 ]
                 self.branch1_points = [p.tolist() for p in b1_fixed_pts]
                 self.branch1_weights = [1.0, 1.0, 1.0]
-                # 更新头部和前一点，使下一步生长从延伸点开始
                 self.branch1_head = b1_fixed_pts[-1]
                 self.branch1_prev = b1_fixed_pts[-2]
 
-                # --- 4. 设置分支 2 (Branch 2) ---
+                # 4. 设置 Branch 2 (Start + 1D + 2D)
                 b2_center = starts[1]
                 b2_tan = tangents[1]
                 b2_fixed_pts = [
@@ -381,7 +375,6 @@ class PipeRoutingEnv(gym.Env):
                 self.branch2_prev = b2_fixed_pts[-2]
 
                 self.current_phase = self.PHASE_BRANCH
-
                 if self._query_potential(self.trunk_head) > -0.5:
                     reward += 5.0
 
@@ -407,6 +400,22 @@ class PipeRoutingEnv(gym.Env):
                     reward += self.weights['success']
                     self.done1 = True
 
+                    # [修改]: 到达终点时，追加3个固定控制点
+                    tgt = self.targets[0]['point']
+                    nrm = self.targets[0]['normal']
+                    D = self.pipe_radius * 2.0
+
+                    # 倒推的顺序: 远 -> 近 -> 终点
+                    # 这样才能保证最后进入目标时是平滑切入
+                    p_ext2 = tgt - nrm * 2.0 * D
+                    p_ext1 = tgt - nrm * D
+                    p_final = tgt
+
+                    self.branch1_points.append(p_ext2.tolist())
+                    self.branch1_points.append(p_ext1.tolist())
+                    self.branch1_points.append(p_final.tolist())
+                    self.branch1_weights.extend([1.0, 1.0, 1.0])
+
             # Branch 2
             if not self.done2:
                 act2 = action[4:8]
@@ -428,5 +437,25 @@ class PipeRoutingEnv(gym.Env):
                     reward += self.weights['success']
                     self.done2 = True
 
+                    # [修改]: 到达终点时，追加3个固定控制点
+                    tgt = self.targets[1]['point']
+                    nrm = self.targets[1]['normal']
+                    D = self.pipe_radius * 2.0
+
+                    p_ext2 = tgt - nrm * 2.0 * D
+                    p_ext1 = tgt - nrm * D
+                    p_final = tgt
+
+                    self.branch2_points.append(p_ext2.tolist())
+                    self.branch2_points.append(p_ext1.tolist())
+                    self.branch2_points.append(p_final.tolist())
+                    self.branch2_weights.extend([1.0, 1.0, 1.0])
+
         done = (self.current_step >= self.max_steps) or (self.done1 and self.done2)
         return self._get_observation(), reward, done, {}
+
+    def render(self, mode='human'):
+        pass
+
+    def close(self):
+        pass
