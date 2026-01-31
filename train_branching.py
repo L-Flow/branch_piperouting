@@ -55,7 +55,7 @@ if __name__ == "__main__":
         env_fn=env_fn,
         ac_kwargs=ac_kwargs,
         steps_per_epoch=4000,
-        epochs=50,          # 适当增加训练轮数
+        epochs=45,          # 适当增加训练轮数
         gamma=0.99,
         clip_ratio=0.2,
         pi_lr=7e-4 ,           # 稍微调大学习率

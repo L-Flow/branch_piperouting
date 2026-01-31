@@ -67,12 +67,27 @@ class Geomdl_NURBS:
         except:
             return 0.0
 
+    def sample_list(self, u_values: list) -> list:
+        return self.curve.evaluate_list(u_values)
+
+    def get_derivatives(self, u: float, order: int) -> list:
+        return self.curve.derivatives(u, order=order)
+
+    def get_new_segment_parameter_range(self) -> tuple:
+        """
+        计算最新增加的一个控制点所对应的参数 u 的范围。
+        基于均匀节点向量的性质： u_start = (n - p) / (n - p + 1)
+        """
+        n = self.num_ctrlpts - 1
+        p = self.degree
+        if n <= p:
+            return 0.0, 1.0
+        u_start = (n - p) / (n - p + 1)
+        return u_start, 1.0
+
 
 # --- 3. 环境主类 ---
 class PipeRoutingEnv(gym.Env):
-    """
-    支持分支管路自动布局的强化学习环境 (Single-Agent, Dual-Channel)
-    """
     metadata = {'render.modes': ['human']}
 
     def __init__(self,
@@ -101,7 +116,6 @@ class PipeRoutingEnv(gym.Env):
         norm_s = np.linalg.norm(start_normal)
         self.N_s = np.array(start_normal, dtype=np.float32) / (norm_s + 1e-6)
 
-        # 处理多目标
         self.targets = []
         self.target_guide_points = []
         for t in target_list:
@@ -116,9 +130,10 @@ class PipeRoutingEnv(gym.Env):
         # 阶段控制参数
         self.PHASE_TRUNK = 0.0
         self.PHASE_BRANCH = 1.0
-        self.SPLIT_STEP = 3  # 建议设为20，给主干足够的生长时间
-        self.max_steps = 60  # 增加总步数以适应分支生长
+        self.SPLIT_STEP = 3
+        self.max_steps = 60
         self.action_step_size = step_size
+        self.sampling_interval_dl = 5.0  # 采样间隔
 
         # 传感器参数
         self.sensor_range = 200.0
@@ -129,10 +144,8 @@ class PipeRoutingEnv(gym.Env):
         self.sensor_directions = [np.array(d) / np.linalg.norm(d) for d in dir_list]
         self.num_sensors = len(self.sensor_directions)
 
-        # 定义动作空间 (8维)
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(8,), dtype=np.float32)
 
-        # 定义观测空间 (39维: 19 + 19 + 1)
         single_obs_dim = 3 + 3 + 3 + self.num_sensors
         total_obs_dim = single_obs_dim * 2 + 1
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(total_obs_dim,), dtype=np.float32)
@@ -140,12 +153,19 @@ class PipeRoutingEnv(gym.Env):
         # 奖励权重
         self.weights = {
             'dist': 0.3,
-            'len': 0.03,  # 稍微调大长度惩罚
-            'obs': 3,
+            'len': 0.03,
+            'obs': 3.0,
             'pe': 1.0,
             'success': 40.0,
-            'curvature': 0.1,  # 曲率惩罚
-            'torsion': 0.05  # 挠率惩罚
+            'curvature': 0.1,
+            'torsion': 0.05
+        }
+
+        # 记录不同部分的曲线长度
+        self.curve_lengths = {
+            'trunk': 0.0,
+            'branch1': 0.0,
+            'branch2': 0.0
         }
 
     def _query_potential(self, point_xyz) -> float:
@@ -156,14 +176,11 @@ class PipeRoutingEnv(gym.Env):
 
     def _calculate_tee_geometry(self, trunk_end, trunk_tangent):
         """计算贴壁三通几何"""
-        # Local Definition
         local_p3 = np.array([25.0, 0.0, 23.5])  # Inlet
         local_p1 = np.array([50.0, 0.0, 0.0])  # Outlet 1
         local_p2 = np.array([0.0, 0.0, 0.0])  # Outlet 2
 
         t_global_z = trunk_tangent / (np.linalg.norm(trunk_tangent) + 1e-6)
-
-        # 径向向量 (指向 Z 轴)
         radial_vec = np.array([-trunk_end[0], -trunk_end[1], 0.0])
         r_norm = np.linalg.norm(radial_vec)
         if r_norm < 1e-3:
@@ -171,7 +188,6 @@ class PipeRoutingEnv(gym.Env):
         else:
             radial_vec /= r_norm
 
-        # 构建旋转矩阵 R (Local Z -> Trunk Tangent)
         u_z = -t_global_z
         proj = radial_vec - np.dot(radial_vec, u_z) * u_z
         if np.linalg.norm(proj) < 1e-3:
@@ -184,39 +200,34 @@ class PipeRoutingEnv(gym.Env):
 
         R = np.stack([u_x, u_y, u_z], axis=1)
 
-        # 计算全局坐标
         T_trans = trunk_end - R @ local_p3
         global_p1 = T_trans + R @ local_p1
         global_p2 = T_trans + R @ local_p2
 
-        # 简单的出口方向向量 (Local X 轴方向)
         global_v1 = R @ np.array([1.0, 0.0, 0.0])
         global_v2 = R @ np.array([-1.0, 0.0, 0.0])
 
-        # 目标匹配
         vec_to_t1 = self.targets[0]['point'] - trunk_end
         if np.dot(global_v1, vec_to_t1) < np.dot(global_v2, vec_to_t1):
             return [global_p2, global_p1], [global_v2, global_v1]
-
         return [global_p1, global_p2], [global_v1, global_v2]
 
     def reset(self):
         self.current_step = 0
         self.current_phase = self.PHASE_TRUNK
 
-        # 初始化主干
+        self.curve_lengths = {'trunk': 0.0, 'branch1': 0.0, 'branch2': 0.0}
+
         p0 = self.P_s
         p1 = self.P_s + self.N_s * self.pipe_radius * 2
         p2 = p1 + self.N_s * self.pipe_radius * 2
 
         self.trunk_points = [p0.tolist(), p1.tolist(), p2.tolist()]
-        # 初始化主干权重
         self.trunk_weights = [1.0, 1.0, 1.0]
 
         self.trunk_head = p2
         self.trunk_prev = p1
 
-        # 初始化分支为空
         self.branch1_head = None
         self.branch2_head = None
         self.branch1_weights = []
@@ -249,15 +260,9 @@ class PipeRoutingEnv(gym.Env):
                 dist = float(step) * (self.sensor_range / 10.0)
             lidar.append(dist / self.sensor_range)
 
-        return np.concatenate([
-            head / SCALE,
-            vec / SCALE,
-            tan,
-            np.array(lidar)
-        ])
+        return np.concatenate([head / SCALE, vec / SCALE, tan, np.array(lidar)])
 
     def _get_observation(self):
-        # 39维
         if self.current_phase == self.PHASE_TRUNK:
             s1 = self._get_single_slot(self.trunk_head, self.trunk_prev, 0)
             s2 = self._get_single_slot(self.trunk_head, self.trunk_prev, 1)
@@ -266,10 +271,12 @@ class PipeRoutingEnv(gym.Env):
             s1 = self._get_single_slot(self.branch1_head, self.branch1_prev, 0)
             s2 = self._get_single_slot(self.branch2_head, self.branch2_prev, 1)
             phase = np.array([1.0], dtype=np.float32)
-
         return np.concatenate([s1, s2, phase]).astype(np.float32)
 
-    def _calc_reward(self, head, prev, target_idx, step_len, history_points, history_weights):
+    def _calc_reward(self, head, prev, target_idx, step_len, history_points, history_weights, branch_id):
+        """
+        计算每一步的过程奖励，包含基于新片段的曲率/挠率惩罚
+        """
         target = self.target_guide_points[target_idx]
 
         d_old = np.linalg.norm(target - prev)
@@ -292,23 +299,70 @@ class PipeRoutingEnv(gym.Env):
         if len(current_seq) >= 4 and len(current_seq) == len(current_weights):
             try:
                 curve = Geomdl_NURBS(current_seq, current_weights, degree=3)
-                u_values = np.linspace(0.9, 0.99, 5)
-                k_vals = []
-                t_vals = []
+                new_total_length = curve.length
 
-                for u in u_values:
-                    derivs = curve.curve.derivatives(u, order=3)
-                    k_vals.append(_calculate_curvature(derivs))
-                    t_vals.append(abs(_calculate_torsion(derivs)))
+                last_length = self.curve_lengths[branch_id]
+                segment_length = new_total_length - last_length
+                self.curve_lengths[branch_id] = new_total_length
 
-                mean_k = np.mean(k_vals) if k_vals else 0.0
-                mean_t = np.mean(t_vals) if t_vals else 0.0
+                if segment_length <= 1e-3:
+                    num_samples = 0
+                else:
+                    num_samples = int(np.ceil(segment_length / self.sampling_interval_dl))
 
-                r_geom = -(self.weights['curvature'] * mean_k + self.weights['torsion'] * mean_t)
+                if num_samples > 0:
+                    u_start, u_end = curve.get_new_segment_parameter_range()
+                    u_values = np.linspace(u_start, u_end, num_samples + 1)[1:]
+
+                    k_vals = []
+                    t_vals = []
+
+                    for u in u_values:
+                        derivs = curve.get_derivatives(u, order=3)
+                        k = _calculate_curvature(derivs)
+                        t = _calculate_torsion(derivs)
+                        k_vals.append(k)
+                        t_vals.append(abs(t))
+
+                    if k_vals:
+                        mean_k = np.mean(k_vals)
+                        mean_t = np.mean(t_vals)
+                        r_geom = -(self.weights['curvature'] * mean_k + self.weights['torsion'] * mean_t)
+
             except Exception:
                 pass
 
         return r_dist + r_len + r_obs + r_pe + r_geom
+
+    def _calc_terminal_penalty(self, points, weights):
+        """
+        [新增] 终端段专用检查：
+        当管路连接成功并追加了固定点后，检查最后一段（u=0.9~0.99）是否存在急转弯。
+        """
+        penalty = 0.0
+        try:
+            full_curve = Geomdl_NURBS(points, weights, degree=3)
+            # 专门采样最后一段
+            u_values = np.linspace(0.9, 0.99, 20)
+
+            k_vals = []
+            t_vals = []
+
+            for u in u_values:
+                derivs = full_curve.get_derivatives(u, order=3)
+                k_vals.append(_calculate_curvature(derivs))
+                t_vals.append(abs(_calculate_torsion(derivs)))
+
+            if k_vals:
+                # 给予比过程惩罚更大的权重
+                w_k = self.weights['curvature'] * 30.0
+                w_t = self.weights['torsion'] * 10.0
+                penalty = -(w_k * np.mean(k_vals) + w_t * np.mean(t_vals))
+
+        except Exception:
+            pass
+
+        return penalty
 
     def step(self, action):
         self.current_step += 1
@@ -319,60 +373,67 @@ class PipeRoutingEnv(gym.Env):
             act = action[0:4]
             d_xyz = act[0:3] * self.action_step_size
             w_real = max(0.1, 1.0 + act[3] * 0.5)
-            self.trunk_weights.append(w_real)
 
             p_new = self.trunk_head + d_xyz
             step_len = np.linalg.norm(d_xyz)
 
-            r1 = self._calc_reward(p_new, self.trunk_head, 0, step_len, self.trunk_points, self.trunk_weights)
-            r2 = self._calc_reward(p_new, self.trunk_head, 1, step_len, self.trunk_points, self.trunk_weights)
+            temp_weights = self.trunk_weights + [w_real]
+
+            r1 = self._calc_reward(p_new, self.trunk_head, 0, step_len, self.trunk_points, temp_weights, 'trunk')
+            r2 = self._calc_reward(p_new, self.trunk_head, 1, step_len, self.trunk_points, temp_weights, 'trunk')
             reward = r1 + r2
 
+            self.trunk_weights.append(w_real)
             self.trunk_prev = self.trunk_head
             self.trunk_head = p_new
             self.trunk_points.append(p_new.tolist())
 
-            # 检查分叉
             if self.current_step == self.SPLIT_STEP:
                 trunk_tan = self.trunk_head - self.trunk_prev
                 trunk_tan_norm = trunk_tan / (np.linalg.norm(trunk_tan) + 1e-6)
-                D = self.pipe_radius * 2.0  # 管径
+                D = self.pipe_radius * 2.0
 
-                # 1. 锁定主干末端 (Center + 1D + 2D)
                 p3_ext1 = self.trunk_head + trunk_tan_norm * D
                 p3_ext2 = self.trunk_head + trunk_tan_norm * 2.0 * D
                 self.trunk_points.append(p3_ext1.tolist())
                 self.trunk_points.append(p3_ext2.tolist())
                 self.trunk_weights.extend([1.0, 1.0])
 
-                # 2. 计算分支几何
+                try:
+                    full_trunk = Geomdl_NURBS(self.trunk_points, self.trunk_weights)
+                    self.curve_lengths['trunk'] = full_trunk.length
+                except:
+                    pass
+
                 starts, tangents = self._calculate_tee_geometry(self.trunk_head, trunk_tan)
 
-                # 3. 设置 Branch 1 (Start + 1D + 2D)
+                # Branch 1 Init
                 b1_center = starts[0]
                 b1_tan = tangents[0]
-                b1_fixed_pts = [
-                    b1_center,
-                    b1_center + b1_tan * D,
-                    b1_center + b1_tan * 2.0 * D
-                ]
+                b1_fixed_pts = [b1_center, b1_center + b1_tan * D, b1_center + b1_tan * 2.0 * D]
                 self.branch1_points = [p.tolist() for p in b1_fixed_pts]
                 self.branch1_weights = [1.0, 1.0, 1.0]
                 self.branch1_head = b1_fixed_pts[-1]
                 self.branch1_prev = b1_fixed_pts[-2]
+                try:
+                    c1 = Geomdl_NURBS(self.branch1_points, self.branch1_weights)
+                    self.curve_lengths['branch1'] = c1.length
+                except:
+                    pass
 
-                # 4. 设置 Branch 2 (Start + 1D + 2D)
+                # Branch 2 Init
                 b2_center = starts[1]
                 b2_tan = tangents[1]
-                b2_fixed_pts = [
-                    b2_center,
-                    b2_center + b2_tan * D,
-                    b2_center + b2_tan * 2.0 * D
-                ]
+                b2_fixed_pts = [b2_center, b2_center + b2_tan * D, b2_center + b2_tan * 2.0 * D]
                 self.branch2_points = [p.tolist() for p in b2_fixed_pts]
                 self.branch2_weights = [1.0, 1.0, 1.0]
                 self.branch2_head = b2_fixed_pts[-1]
                 self.branch2_prev = b2_fixed_pts[-2]
+                try:
+                    c2 = Geomdl_NURBS(self.branch2_points, self.branch2_weights)
+                    self.curve_lengths['branch2'] = c2.length
+                except:
+                    pass
 
                 self.current_phase = self.PHASE_BRANCH
                 if self._query_potential(self.trunk_head) > -0.5:
@@ -384,14 +445,15 @@ class PipeRoutingEnv(gym.Env):
             if not self.done1:
                 act1 = action[0:4]
                 w1_real = max(0.1, 1.0 + act1[3] * 0.5)
-                self.branch1_weights.append(w1_real)
+                temp_w1 = self.branch1_weights + [w1_real]
 
                 p1_new = self.branch1_head + act1[0:3] * self.action_step_size
                 len1 = np.linalg.norm(p1_new - self.branch1_head)
 
                 reward += self._calc_reward(p1_new, self.branch1_head, 0, len1, self.branch1_points,
-                                            self.branch1_weights)
+                                            temp_w1, 'branch1')
 
+                self.branch1_weights.append(w1_real)
                 self.branch1_prev = self.branch1_head
                 self.branch1_head = p1_new
                 self.branch1_points.append(p1_new.tolist())
@@ -399,36 +461,34 @@ class PipeRoutingEnv(gym.Env):
                 if np.linalg.norm(p1_new - self.target_guide_points[0]) < 100.0:
                     reward += self.weights['success']
                     self.done1 = True
-
-                    # [修改]: 到达终点时，追加3个固定控制点
+                    # 终点处理
                     tgt = self.targets[0]['point']
                     nrm = self.targets[0]['normal']
                     D = self.pipe_radius * 2.0
-
-                    # 倒推的顺序: 远 -> 近 -> 终点
-                    # 这样才能保证最后进入目标时是平滑切入
-                    p_ext2 = tgt - nrm * 2.0 * D
-                    p_ext1 = tgt - nrm * D
-                    p_final = tgt
-
-                    self.branch1_points.append(p_ext2.tolist())
-                    self.branch1_points.append(p_ext1.tolist())
-                    self.branch1_points.append(p_final.tolist())
+                    self.branch1_points.extend([
+                        (tgt - nrm * 2.0 * D).tolist(),
+                        (tgt - nrm * D).tolist(),
+                        tgt.tolist()
+                    ])
                     self.branch1_weights.extend([1.0, 1.0, 1.0])
+
+                    # [新增] 计算终端惩罚
+                    term_penalty = self._calc_terminal_penalty(self.branch1_points, self.branch1_weights)
+                    reward += term_penalty
 
             # Branch 2
             if not self.done2:
                 act2 = action[4:8]
-                # [关键修正] 使用 act2[3] 而不是 act2[7] (act2 是切片后的数组, 索引为 0~3)
                 w2_real = max(0.1, 1.0 + act2[3] * 0.5)
-                self.branch2_weights.append(w2_real)
+                temp_w2 = self.branch2_weights + [w2_real]
 
                 p2_new = self.branch2_head + act2[0:3] * self.action_step_size
                 len2 = np.linalg.norm(p2_new - self.branch2_head)
 
                 reward += self._calc_reward(p2_new, self.branch2_head, 1, len2, self.branch2_points,
-                                            self.branch2_weights)
+                                            temp_w2, 'branch2')
 
+                self.branch2_weights.append(w2_real)
                 self.branch2_prev = self.branch2_head
                 self.branch2_head = p2_new
                 self.branch2_points.append(p2_new.tolist())
@@ -436,20 +496,20 @@ class PipeRoutingEnv(gym.Env):
                 if np.linalg.norm(p2_new - self.target_guide_points[1]) < 100.0:
                     reward += self.weights['success']
                     self.done2 = True
-
-                    # [修改]: 到达终点时，追加3个固定控制点
+                    # 终点处理
                     tgt = self.targets[1]['point']
                     nrm = self.targets[1]['normal']
                     D = self.pipe_radius * 2.0
-
-                    p_ext2 = tgt - nrm * 2.0 * D
-                    p_ext1 = tgt - nrm * D
-                    p_final = tgt
-
-                    self.branch2_points.append(p_ext2.tolist())
-                    self.branch2_points.append(p_ext1.tolist())
-                    self.branch2_points.append(p_final.tolist())
+                    self.branch2_points.extend([
+                        (tgt - nrm * 2.0 * D).tolist(),
+                        (tgt - nrm * D).tolist(),
+                        tgt.tolist()
+                    ])
                     self.branch2_weights.extend([1.0, 1.0, 1.0])
+
+                    # [新增] 计算终端惩罚
+                    term_penalty = self._calc_terminal_penalty(self.branch2_points, self.branch2_weights)
+                    reward += term_penalty
 
         done = (self.current_step >= self.max_steps) or (self.done1 and self.done2)
         return self._get_observation(), reward, done, {}
