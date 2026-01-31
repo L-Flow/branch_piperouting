@@ -8,8 +8,8 @@ from pipe_env import PipeRoutingEnv
 from spinup.utils.mpi_tools import mpi_fork
 
 # --- 1. 配置路径 ---
-PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/assembly7_pe_leaflevel.npy"
-META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/assembly7_pe_meta.json"
+PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_leaflevel.npy"
+META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_meta.json"
 
 if not (os.path.exists(PE_MAP_FILE) and os.path.exists(META_FILE)):
     print(f"Error: Environment files not found.")
@@ -59,8 +59,8 @@ if __name__ == "__main__":
         epochs=2000,          # 适当增加训练轮数
         gamma=0.99,
         clip_ratio=0.2,
-        pi_lr=6e-4 ,           # 稍微调大学习率
-        vf_lr=2e-3 ,
+        pi_lr=7e-4 ,           # 稍微调大学习率
+        vf_lr=1e-3 ,
         lam=0.97,
         max_ep_len=60,        # 增加步数上限以容纳主干+分支
         logger_kwargs=logger_kwargs

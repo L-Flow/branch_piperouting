@@ -8,8 +8,8 @@ from pipe_env import PipeRoutingEnv
 
 # --- 1. 配置路径 (请修改为你实际的路径) ---
 # 确保这些路径与训练时完全一致
-PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/assembly7_pe_leaflevel.npy"
-META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/assembly7_pe_meta.json"
+PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_leaflevel.npy"
+META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_meta.json"
 MODEL_PATH = "ppo_results/branching_run1/pyt_save/model.pt"
 
 # --- 2. 定义双目标任务参数 ---

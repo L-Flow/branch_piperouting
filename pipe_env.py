@@ -116,7 +116,7 @@ class PipeRoutingEnv(gym.Env):
         # 阶段控制参数
         self.PHASE_TRUNK = 0.0
         self.PHASE_BRANCH = 1.0
-        self.SPLIT_STEP = 10  # 建议设为20，给主干足够的生长时间
+        self.SPLIT_STEP = 3  # 建议设为20，给主干足够的生长时间
         self.max_steps = 60  # 增加总步数以适应分支生长
         self.action_step_size = step_size
 
@@ -140,12 +140,12 @@ class PipeRoutingEnv(gym.Env):
         # 奖励权重
         self.weights = {
             'dist': 0.5,
-            'len': 0.02,  # 稍微调大长度惩罚
-            'obs': 0.2,
+            'len': 0.03,  # 稍微调大长度惩罚
+            'obs': 2,
             'pe': 1.0,
             'success': 40.0,
-            'curvature': 0.5,  # 曲率惩罚
-            'torsion': 0.1  # 挠率惩罚
+            'curvature': 0.005,  # 曲率惩罚
+            'torsion': 0.005  # 挠率惩罚
         }
 
     def _query_potential(self, point_xyz) -> float:
@@ -157,7 +157,7 @@ class PipeRoutingEnv(gym.Env):
     def _calculate_tee_geometry(self, trunk_end, trunk_tangent):
         """计算贴壁三通几何"""
         # Local Definition
-        local_p3 = np.array([-25.0, 0.0, -23.5])  # Inlet
+        local_p3 = np.array([25.0, 0.0, -23.5])  # Inlet
         local_p1 = np.array([0.0, 0.0, 0.0])  # Outlet 1
         local_p2 = np.array([50.0, 0.0, 0.0])  # Outlet 2
 
@@ -403,7 +403,7 @@ class PipeRoutingEnv(gym.Env):
                 self.branch1_head = p1_new
                 self.branch1_points.append(p1_new.tolist())
 
-                if np.linalg.norm(p1_new - self.target_guide_points[0]) < 50.0:
+                if np.linalg.norm(p1_new - self.target_guide_points[0]) < 100.0:
                     reward += self.weights['success']
                     self.done1 = True
 
@@ -424,7 +424,7 @@ class PipeRoutingEnv(gym.Env):
                 self.branch2_head = p2_new
                 self.branch2_points.append(p2_new.tolist())
 
-                if np.linalg.norm(p2_new - self.target_guide_points[1]) < 50.0:
+                if np.linalg.norm(p2_new - self.target_guide_points[1]) < 100.0:
                     reward += self.weights['success']
                     self.done2 = True
 
