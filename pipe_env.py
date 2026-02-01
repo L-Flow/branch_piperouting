@@ -152,9 +152,9 @@ class PipeRoutingEnv(gym.Env):
 
         # 奖励权重
         self.weights = {
-            'dist': 0.2,
-            'len': 0.01,
-            'obs': 3.0,
+            'dist': 0.3,
+            'len': 0.02,
+            'obs': 0.1,
             'pe': 1.0,
             'success': 40.0,
             'curvature': 0.1,
@@ -274,28 +274,30 @@ class PipeRoutingEnv(gym.Env):
         return np.concatenate([s1, s2, phase]).astype(np.float32)
 
     def _calc_reward(self, head, prev, target_idx, step_len, history_points, history_weights, branch_id):
-        """
-        计算每一步的过程奖励，包含基于新片段的曲率/挠率惩罚
-        """
         target = self.target_guide_points[target_idx]
 
+        # 1. 距离奖励
         d_old = np.linalg.norm(target - prev)
         d_new = np.linalg.norm(target - head)
         r_dist = (d_old - d_new) * self.weights['dist']
+
+        # 2. 长度惩罚
         r_len = -step_len * self.weights['len']
 
-        pe = self._query_potential(head)
+        # --- [关键修改开始] ---
+        # 我们不再单独检查 head，而是将避障积分到曲线采样中
+
         r_obs = 0.0
         r_pe = 0.0
-        if pe < -0.5:
-            r_obs = -2.0 * self.weights['obs']
-        else:
-            r_pe = (pe - self.max_potential) * self.weights['pe']
-
         r_geom = 0.0
+
+        # 临时列表用于收集势能，计算平均值
+        pe_samples = []
+
         current_seq = history_points + [head.tolist()]
         current_weights = history_weights
 
+        # 只有点数足够构建3阶曲线时才计算
         if len(current_seq) >= 4 and len(current_seq) == len(current_weights):
             try:
                 curve = Geomdl_NURBS(current_seq, current_weights, degree=3)
@@ -305,32 +307,72 @@ class PipeRoutingEnv(gym.Env):
                 segment_length = new_total_length - last_length
                 self.curve_lengths[branch_id] = new_total_length
 
+                # 决定采样点数
                 if segment_length <= 1e-3:
                     num_samples = 0
                 else:
-                    num_samples = int(np.ceil(segment_length / self.sampling_interval_dl))
+                    # 保证至少采几个点，避免"跨越"障碍
+                    # 建议：最少采 5 个点，或者按步长除以5
+                    num_samples = max(5, int(np.ceil(segment_length / self.sampling_interval_dl)))
 
                 if num_samples > 0:
                     u_start, u_end = curve.get_new_segment_parameter_range()
+                    # 生成采样参数 u
                     u_values = np.linspace(u_start, u_end, num_samples + 1)[1:]
+
+                    # 获取曲线上的物理坐标点
+                    sample_points = curve.sample_list(u_values)
 
                     k_vals = []
                     t_vals = []
 
-                    for u in u_values:
+                    # [关键循环] 同时检测几何属性和物理避障
+                    for i, u in enumerate(u_values):
+                        # 1. 几何计算
                         derivs = curve.get_derivatives(u, order=3)
                         k = _calculate_curvature(derivs)
                         t = _calculate_torsion(derivs)
                         k_vals.append(k)
                         t_vals.append(abs(t))
 
+                        # 2. 避障检测 (使用曲线上的点 pt，而不是控制点 head)
+                        pt = sample_points[i]
+                        pe = self._query_potential(pt)
+
+                        if pe < -0.5:  # 遇到障碍物
+                            # 累加惩罚：穿过得越长，扣分越多
+                            # 这里参考单管路逻辑，直接累加负的 pe 值
+                            r_obs += pe * self.weights['obs']
+                        else:
+                            # 收集正势能 (引导场)
+                            pe_samples.append(pe)
+
+                    # 计算几何平均值
                     if k_vals:
                         mean_k = np.mean(k_vals)
                         mean_t = np.mean(t_vals)
                         r_geom = -(self.weights['curvature'] * mean_k + self.weights['torsion'] * mean_t)
 
-            except Exception:
+            except Exception as e:
+                # 容错：如果曲线构建失败，至少检查一下 head 点，作为保底
+                pe_head = self._query_potential(head)
+                if pe_head < -0.5:
+                    r_obs = -10.0  # 给予固定重罚
                 pass
+        else:
+            # 如果点不够构建曲线（起步阶段），退化为检查 head
+            pe = self._query_potential(head)
+            if pe < -0.5:
+                r_obs = -2.0 * self.weights['obs']
+            else:
+                pe_samples.append(pe)
+
+        # 计算势能引导奖励 (取平均)
+        if pe_samples:
+            mean_pe = np.mean(pe_samples)
+            r_pe = (mean_pe - self.max_potential) * self.weights['pe']
+
+        # --- [关键修改结束] ---
 
         return r_dist + r_len + r_obs + r_pe + r_geom
 
