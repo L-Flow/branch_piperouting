@@ -153,7 +153,7 @@ class PipeRoutingEnv(gym.Env):
         # 奖励权重
         self.weights = {
             'dist': 0.2,
-            'len': 0.02,
+            'len': 0.01,
             'obs': 3.0,
             'pe': 1.0,
             'success': 40.0,

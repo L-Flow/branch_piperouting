@@ -8,8 +8,8 @@ from pipe_env import PipeRoutingEnv
 from spinup.utils.mpi_tools import mpi_fork
 
 # --- 1. 配置路径 ---
-PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_leaflevel.npy"
-META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_meta.json"
+PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_leaflevel(1).npy"
+META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_meta(1).json"
 
 if not (os.path.exists(PE_MAP_FILE) and os.path.exists(META_FILE)):
     print(f"Error: Environment files not found.")
@@ -17,14 +17,14 @@ if not (os.path.exists(PE_MAP_FILE) and os.path.exists(META_FILE)):
 
 # --- 2. 定义双目标任务 ---
 # 起点
-START_PT = [502.84, -188, -109.83]
-START_N = [10, 17.32, 0.0]
-
+START_PT = [462.84, 273.6, -448.6]
+START_N = [0, 0, 1]
 
 TARGET_LIST = [
     # Target 1 (左侧分支目标)
-    {'point': [462.84, 273.6, -448.6], 'normal': [0, 0, -1]},
-    {'point': [44, 537.5, -229], 'normal': [-1, 0, 0]}
+    {'point': [44, 537.5, -229], 'normal': [-1, 0, 0]},
+    {'point': [502.84, -188, -109.83], 'normal': [-10, -17.32, 0.0]}
+
 ]
 
 
