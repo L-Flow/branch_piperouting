@@ -110,7 +110,7 @@ def main():
     ax.set_xlabel('X (mm)')
     ax.set_ylabel('Y (mm)')
     ax.set_zlabel('Z (mm)')
-    ax.set_title('Pipe Layout (Exported to SW)')
+    ax.set_title('Pipe Layout')
 
     # 自动调整坐标轴比例 (Equal Aspect Ratio)
     if all_points:

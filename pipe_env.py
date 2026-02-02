@@ -153,11 +153,11 @@ class PipeRoutingEnv(gym.Env):
         # 奖励权重
         self.weights = {
             'dist': 0.3,
-            'len': 0.02,
-            'obs': 0.1,
+            'len': 0.05,
+            'obs': 0.4,
             'pe': 1.0,
             'success': 40.0,
-            'curvature': 0.1,
+            'curvature': 0.07,
             'torsion': 0.05
         }
 
@@ -397,7 +397,7 @@ class PipeRoutingEnv(gym.Env):
 
             if k_vals:
                 # 给予比过程惩罚更大的权重
-                w_k = self.weights['curvature'] * 30.0
+                w_k = self.weights['curvature'] * 40.0
                 w_t = self.weights['torsion'] * 10.0
                 penalty = -(w_k * np.mean(k_vals) + w_t * np.mean(t_vals))
 
@@ -447,8 +447,8 @@ class PipeRoutingEnv(gym.Env):
                 except:
                     pass
 
-                starts, tangents = self._calculate_tee_geometry(self.trunk_head, trunk_tan)
-
+                # starts, tangents = self._calculate_tee_geometry(self.trunk_head, trunk_tan)
+                starts, tangents = self._calculate_tee_geometry(p3_ext2, trunk_tan)
                 # Branch 1 Init
                 b1_center = starts[0]
                 b1_tan = tangents[0]
@@ -561,3 +561,5 @@ class PipeRoutingEnv(gym.Env):
 
     def close(self):
         pass
+
+    #python -m spinup.run plot /home/ljh/PycharmProjects/branchpipe/ppo_results

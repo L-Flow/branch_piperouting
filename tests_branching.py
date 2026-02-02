@@ -8,20 +8,21 @@ from pipe_env import PipeRoutingEnv
 
 # --- 1. 配置路径 (请修改为你实际的路径) ---
 # 确保这些路径与训练时完全一致
-PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_leaflevel(1).npy"
-META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_meta(1).json"
+PE_MAP_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_leaflevel(2).npy"
+META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical_pe_meta(2).json"
 MODEL_PATH = "ppo_results/branching_run1/pyt_save/model.pt"
 
 # --- 2. 定义双目标任务参数 ---
-START_PT = [462.84, 273.6, -448.6]
-START_N = [0, 0, 1]
+START_PT = [419.87, -335.75, -634.55]
+START_N = [10, 17.32, 0.0]
 
 TARGET_LIST = [
     # Target 1 (左侧分支目标)
-    {'point': [44, 537.5, -229], 'normal': [-1, 0, 0]},
-    {'point': [502.84, -188, -109.83], 'normal': [-10, -17.32, 0.0]}
+    {'point': [505.34, 210.84, -512.15], 'normal': [-10, 13.77, 0]},
+    {'point': [471.04, -98.03, -946.4], 'normal': [0, 0, -1]}
 
 ]
+
 
 # --- 3. 环境构建 ---
 env_fn = lambda: PipeRoutingEnv(
