@@ -152,13 +152,13 @@ class PipeRoutingEnv(gym.Env):
 
         # 奖励权重
         self.weights = {
-            'dist': 0.3,
+            'dist': 0.4,
             'len': 0.05,
-            'obs': 0.4,
+            'obs': 0.2,
             'pe': 1.0,
             'success': 40.0,
-            'curvature': 0.07,
-            'torsion': 0.05
+            'curvature': 0.08,
+            'torsion': 0.03
         }
 
         # 记录不同部分的曲线长度
