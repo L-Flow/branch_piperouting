@@ -158,7 +158,8 @@ class PipeRoutingEnv(gym.Env):
             'pe': 1.0,
             'success': 40.0,
             'curvature': 0.08,
-            'torsion': 0.03
+            'torsion': 0.03,
+            'flow_balance': 50.0
         }
 
         # 记录不同部分的曲线长度
@@ -406,6 +407,37 @@ class PipeRoutingEnv(gym.Env):
 
         return penalty
 
+    def _calc_hydraulic_resistance(self, points, weights):
+        """
+        [新增] 估算单根管路的流阻代理值 R
+        物理模型: R = 沿程阻力(与长度成正比) + 局部阻力(与曲率积分成正比)
+        """
+        if len(points) < 4:
+            return 0.0
+
+        try:
+            curve = Geomdl_NURBS(points, weights, degree=3)
+            length = curve.length
+
+            # 采样计算累积曲率 (代表弯头带来的二次流阻力)
+            u_values = np.linspace(0.0, 1.0, 20)[1:-1]
+            total_curvature = 0.0
+            for u in u_values:
+                derivs = curve.get_derivatives(u, order=2)
+                k = _calculate_curvature(derivs)
+                total_curvature += k
+
+            # 系数 alpha 和 beta 可根据实际管径和流体雷诺数标定
+            # 这里给出一个经验性的权重：假设1单位长度的阻力，相当于一定曲率的阻力
+            alpha = 1.0
+            beta = 50.0  # 局部弯曲对流阻的影响通常被显著放大
+
+            resistance = alpha * length + beta * total_curvature
+            return resistance
+        except Exception:
+            # 容错处理
+            return 9999.0
+
     def step(self, action):
         self.current_step += 1
         reward = 0.0
@@ -553,6 +585,29 @@ class PipeRoutingEnv(gym.Env):
                     term_penalty = self._calc_terminal_penalty(self.branch2_points, self.branch2_weights)
                     reward += term_penalty
 
+                # 检查是否刚刚在这一步双双完成任务
+        just_finished = (self.done1 and self.done2) and not (self.current_step >= self.max_steps)
+
+        if just_finished:
+                    # ===[新增核心逻辑: 终端流阻平衡清算] ===
+                    # 1. 计算两根管路的最终流阻代理值
+            R1 = self._calc_hydraulic_resistance(self.branch1_points, self.branch1_weights)
+            R2 = self._calc_hydraulic_resistance(self.branch2_points, self.branch2_weights)
+
+                    # 2. 计算流阻不平衡度 (归一化差异: 0表示完美平衡，越大越不平衡)
+                    # 加上 1e-6 防止分母为 0
+            imbalance_ratio = abs(R1 - R2) / (max(R1, R2) + 1e-6)
+
+                    # 3. 转化为奖励：差异越小，惩罚越小（或者转换为正奖励）
+                    # 这里采用惩罚机制：如果不平衡度达到 1.0 (一根极其长一根极短)，扣除大量分数
+            r_flow_balance = - imbalance_ratio * self.weights['flow_balance']
+
+            reward += r_flow_balance
+
+                    # （可选）在控制台打印日志，方便你观察 RL 是否学到了平衡
+                    # print(f"Target reached! R1: {R1:.1f}, R2: {R2:.1f}, Imbalance: {imbalance_ratio:.2%}, Penalty: {r_flow_balance:.1f}")
+
+                # 下面这两行也必须左对齐！保证每个 step 必然有返回值
         done = (self.current_step >= self.max_steps) or (self.done1 and self.done2)
         return self._get_observation(), reward, done, {}
 
