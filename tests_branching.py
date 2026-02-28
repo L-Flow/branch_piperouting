@@ -13,17 +13,24 @@ META_FILE = "/home/ljh/PycharmProjects/octree_test1025/out_octree_pe/cylindrical
 MODEL_PATH = "ppo_results/branching_run1/pyt_save/model.pt"
 
 # --- 2. 定义双目标任务参数 ---
-START_PT = [419.87, -335.75, -634.55]
-START_N = [10, 17.32, 0.0]
+# START_PT = [419.87, -335.75, -634.55]
+# START_N = [10, 17.32, 0.0]
+#
+# TARGET_LIST = [
+#     # Target 1 (左侧分支目标)
+#     {'point': [505.34, 210.84, -512.15], 'normal': [-10, 13.77, 0]},
+#     {'point': [471.04, -98.03, -946.4] , 'normal': [0, 0, -1]}
+#
+# ]
+START_PT = [58.5, -552.25, -309.25]
+START_N = [1, 0, 0]
 
 TARGET_LIST = [
     # Target 1 (左侧分支目标)
-    {'point': [505.34, 210.84, -512.15], 'normal': [-10, 13.77, 0]},
+    {'point': [535.98, -75.53, -256.99], 'normal': [1, 11.55, 0]},
     {'point': [471.04, -98.03, -946.4] , 'normal': [0, 0, -1]}
 
 ]
-
-
 # --- 3. 环境构建 ---
 env_fn = lambda: PipeRoutingEnv(
     pe_map_path=PE_MAP_FILE,

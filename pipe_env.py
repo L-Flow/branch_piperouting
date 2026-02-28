@@ -155,11 +155,11 @@ class PipeRoutingEnv(gym.Env):
             'dist': 0.4,
             'len': 0.05,
             'obs': 0.2,
-            'pe': 1.0,
+            'pe': 1.5,
             'success': 40.0,
             'curvature': 0.08,
-            'torsion': 0.03,
-            'flow_balance': 50.0
+            'torsion': 0.02,
+            'flow_balance': 60.0
         }
 
         # 记录不同部分的曲线长度
@@ -398,8 +398,8 @@ class PipeRoutingEnv(gym.Env):
 
             if k_vals:
                 # 给予比过程惩罚更大的权重
-                w_k = self.weights['curvature'] * 40.0
-                w_t = self.weights['torsion'] * 10.0
+                w_k = self.weights['curvature'] * 50.0
+                w_t = self.weights['torsion'] * 30.0
                 penalty = -(w_k * np.mean(k_vals) + w_t * np.mean(t_vals))
 
         except Exception:
