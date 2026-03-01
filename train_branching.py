@@ -38,13 +38,13 @@ if not (os.path.exists(PE_MAP_FILE) and os.path.exists(META_FILE)):
 
 
 
-START_PT = [471.04, -98.03, -946.4]
-START_N = [0, 0, -1]
+START_PT = [58.5, -552.25, -309.25]
+START_N = [1, 0, 0]
 
 TARGET_LIST = [
     # Target 1 (左侧分支目标)
     {'point': [535.98, -75.53, -256.99], 'normal': [1, 11.55, 0]},
-    {'point': [58.5, -552.25, -309.25] , 'normal': [1, 0, 0]}
+    {'point': [471.04, -98.03, -946.4] , 'normal': [0, 0, -1]}
 
 ]
 

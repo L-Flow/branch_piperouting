@@ -157,7 +157,7 @@ class PipeRoutingEnv(gym.Env):
             'obs': 0.2,
             'pe': 1.5,
             'success': 40.0,
-            'curvature': 0.08,
+            'curvature': 0.2,
             'torsion': 0.02,
             'flow_balance': 60.0
         }
@@ -177,15 +177,15 @@ class PipeRoutingEnv(gym.Env):
 
     def _calculate_tee_geometry(self, trunk_end, trunk_tangent):
         """计算贴壁三通几何"""
-        local_p3 = np.array([25.0, 0.0, 23.5])  # Inlet
-        local_p1 = np.array([50.0, 0.0, 0.0])  # Outlet 1
-        local_p2 = np.array([0.0, 0.0, 0.0])  # Outlet 2
+        local_p3 = np.array([0.0, 0.0, 40])  # Inlet
+        local_p1 = np.array([-28.8, 0.0, -28.8])  # Outlet 1
+        local_p2 = np.array([28.8, 0.0, -28.8])  # Outlet 2
 
         t_global_z = trunk_tangent / (np.linalg.norm(trunk_tangent) + 1e-6)
         radial_vec = np.array([-trunk_end[0], -trunk_end[1], 0.0])
         r_norm = np.linalg.norm(radial_vec)
         if r_norm < 1e-3:
-            radial_vec = np.array([1.0, 0.0, 0.0])
+            radial_vec = np.array([0.0, 0.0, 1.0])
         else:
             radial_vec /= r_norm
 
@@ -205,8 +205,8 @@ class PipeRoutingEnv(gym.Env):
         global_p1 = T_trans + R @ local_p1
         global_p2 = T_trans + R @ local_p2
 
-        global_v1 = R @ np.array([1.0, 0.0, 0.0])
-        global_v2 = R @ np.array([-1.0, 0.0, 0.0])
+        global_v1 = R @ np.array([-1.0, 0.0, -1.0])
+        global_v2 = R @ np.array([1.0, 0.0, -1.0])
 
         vec_to_t1 = self.targets[0]['point'] - trunk_end
         if np.dot(global_v1, vec_to_t1) < np.dot(global_v2, vec_to_t1):
